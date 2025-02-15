@@ -1,33 +1,37 @@
-import sys
 import os
+import sys
 import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 import cv2
 import io
 import numpy as np
-from elasticsearch import Elasticsearch
-from elasticsearch.exceptions import NotFoundError
+from elasticsearch import Elasticsearch, NotFoundError
 import json
+import logging
+from typing import List
+
+# Logging configuration
+logging.basicConfig(level=logging.INFO)
 
 # Elasticsearch Configuration (Replace with your actual Elasticsearch endpoint)
-ES_HOST = "http://your-elasticsearch-host:9200"
+ES_HOST = os.getenv("ES_HOST", "http://your-elasticsearch-host:9200")
 
 # Initialize Elasticsearch Client
 try:
     es = Elasticsearch([ES_HOST], verify_certs=False)
 
     if not es.ping():
-        print("Error: Elasticsearch is not available. Please check the connection.")
+        logging.error("Elasticsearch is not available. Please check the connection.")
         sys.exit(1)
 except Exception as e:
-    print("Error connecting to Elasticsearch:", e)
+    logging.error("Error connecting to Elasticsearch: %s", e)
     sys.exit(1)
 
-def extract_text_from_text_pdf(pdf_path):
+def extract_text_from_text_pdf(pdf_path: str) -> str:
     """
     Extracts text from a text-based PDF file.
-    
+
     Args:
         pdf_path (str): Path to the PDF file.
 
@@ -40,10 +44,10 @@ def extract_text_from_text_pdf(pdf_path):
             for page in doc:
                 text += page.get_text()
     except Exception as e:
-        print("Error extracting text from text-based PDF:", e)
+        logging.error("Error extracting text from text-based PDF: %s", e)
     return text
 
-def extract_text_from_scanned_pdf(pdf_path):
+def extract_text_from_scanned_pdf(pdf_path: str) -> str:
     """
     Extracts text from an image-based (scanned) PDF file using OCR.
 
@@ -58,21 +62,21 @@ def extract_text_from_scanned_pdf(pdf_path):
         with fitz.open(pdf_path) as doc:
             for page in doc:
                 image_list = page.get_images(full=True)
-                for img_index, img in enumerate(image_list):
+                for img in image_list:
                     xref = img[0]
                     base_image = doc.extract_image(xref)
                     image_data = base_image["image"]
                     image = Image.open(io.BytesIO(image_data))
-                    
+
                     # Convert image to grayscale for better OCR accuracy
                     gray_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
                     extracted_text = pytesseract.image_to_string(gray_image)
                     text += extracted_text
     except Exception as e:
-        print("Error extracting text from scanned PDF:", e)
+        logging.error("Error extracting text from scanned PDF: %s", e)
     return text
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_from_pdf(pdf_path: str) -> str:
     """
     Determines whether the PDF is text-based or scanned and extracts text accordingly.
 
@@ -87,7 +91,7 @@ def extract_text_from_pdf(pdf_path):
         text = extract_text_from_scanned_pdf(pdf_path)
     return text
 
-def index_text_to_elasticsearch(text, pdf_path):
+def index_text_to_elasticsearch(text: str, pdf_path: str) -> None:
     """
     Indexes extracted text into Elasticsearch.
 
@@ -99,9 +103,9 @@ def index_text_to_elasticsearch(text, pdf_path):
     try:
         es.index(index="pdf_index", body={"text": text, "filename": filename, "path": pdf_path})
     except Exception as e:
-        print("Error indexing document:", e)
+        logging.error("Error indexing document: %s", e)
 
-def search_text(query):
+def search_text(query: str) -> List[dict]:
     """
     Searches indexed documents in Elasticsearch.
 
@@ -121,7 +125,7 @@ def search_text(query):
         )
         return res["hits"]["hits"]
     except Exception as e:
-        print("Error searching Elasticsearch:", e)
+        logging.error("Error searching Elasticsearch: %s", e)
         return []
 
 if __name__ == "__main__":
@@ -153,7 +157,7 @@ if __name__ == "__main__":
             try:
                 es.indices.create(index="pdf_index")
             except Exception as e:
-                print("Error creating Elasticsearch index:", e)
+                logging.error("Error creating Elasticsearch index: %s", e)
                 sys.exit(1)
 
         extracted_text = extract_text_from_pdf(pdf_path)
